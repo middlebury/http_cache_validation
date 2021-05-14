@@ -1,0 +1,105 @@
+#!/usr/bin/env php
+<?php
+
+/**
+ * Loop through every line in the input file and extract it into tab-delimited columums.
+ *
+ * Columns are:
+ *    Count: number of entries in the input -- sorted on this column.
+ *    Protocol: http or https
+ *    Hostname
+ *    Request
+ *    Response status
+ */
+
+try {
+
+  $output_http = dirname(__FILE__) . '/data/output-http';
+  $output_http_handle = fopen($output_http, 'w');
+  if (!$output_http_handle) {
+    throw new Exception('Cannot write to ' . $output_http);
+  }
+
+  $output_https = dirname(__FILE__) . '/data/output-https';
+  $output_https_handle = fopen($output_https, 'w');
+  if (!$output_https_handle) {
+    throw new Exception('Cannot write to ' . $output_https);
+  }
+
+  $output_skipped = dirname(__FILE__) . '/data/output-skipped';
+  $output_skipped_handle = fopen($output_skipped, 'w');
+  if (!$output_skipped_handle) {
+    throw new Exception('Cannot write to ' . $output_skipped);
+  }
+
+  for ($i = 1; $i <= $argc; $i++) {
+    $input_handle = @fopen($argv[$i], "r");
+    if ($input_handle) {
+      $i = 0;
+      while (($buffer = fgets($input_handle, 4096)) !== false) {
+        $i++;
+        extract_line($buffer, $output_http_handle, $output_https_handle, $output_skipped_handle);
+        // if ($i > 10) {
+        //   throw new Exception("Stopping after 10 for debug.");
+        // }
+      }
+      if (!feof($input_handle)) {
+          throw new Exception("Error: unexpected fgets() fail\n");
+      }
+      fclose($input_handle);
+    }
+  }
+
+  fclose($output_http_handle);
+  fclose($output_https_handle);
+  fclose($output_skipped_handle);
+
+  // Sort and deduplicate results.
+  shell_exec('cat ' . escapeshellarg($output_http) . ' | sort | uniq -c | sort -nr | sed "s/^ \+//g" | sed "s/ /\t/g" > ' . escapeshellarg($output_http . '.tmp'));
+  rename($output_http . '.tmp', $output_http);
+  shell_exec('cat ' . escapeshellarg($output_https) . ' | sort | uniq -c | sort -nr | sed "s/^ \+//g" | sed "s/ /\t/g" > ' . escapeshellarg($output_https . '.tmp'));
+  rename($output_https . '.tmp', $output_https);
+
+} catch (Exception $e) {
+  if ($input_handle) {
+    fclose($input_handle);
+  }
+  if ($output_http_handle) {
+    fclose($output_http_handle);
+  }
+  if ($output_https_handle) {
+    fclose($output_https_handle);
+  }
+  if ($output_skipped_handle) {
+    fclose($output_skipped_handle);
+  }
+  print "\n" . $e->getMessage() . "\n";
+  exit($e->getCode());
+}
+
+function extract_line($line, $output_http_handle, $output_https_handle, $output_skipped_handle) {
+  if (preg_match('#^([^\s]+) "[^"]+" \[[^\]]+\] "(\w+) http://([^/:]+)(?::\d+)?(/[^\s]*) HTTP/1\.." (\d+) .+ (\w+|-)$#', $line, $m)) {
+    // Ignore other types of requests.
+    if ($m[2] != 'GET') {
+      return;
+    }
+    // Ignore IP addresses as hostname.
+    if (preg_match('/^\d+\.\d+\.\d+\.\d+$/', $m[3])) {
+      return;
+    }
+    // Ignore 304 unmodified responses.
+    if ($m[5] == '304') {
+      return;
+    }
+
+    if ($m[1] == '::1') {
+      $output_line = "https\t" . $m[3] . "\t" . $m[4] . "\t" . $m[5] . "\n";
+      fputs($output_https_handle, $output_line);
+    } else {
+      $output_line = "http\t" . $m[3] . "\t" . $m[4] . "\t" . $m[5] . "\n";
+      fputs($output_http_handle, $output_line);
+    }
+  } else {
+    fputs($output_skipped_handle, $line);
+  }
+}
