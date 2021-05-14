@@ -1,0 +1,14 @@
+{
+    "name": "middlebury/http_cache_validation",
+    "description": "Test scripts to validate the operation of a new caching system.",
+    "license": "GPL-3.0-or-later",
+    "authors": [
+        {
+            "name": "Adam Franco",
+            "email": "afranco@middlebury.edu"
+        }
+    ],
+    "require": {
+        "guzzlehttp/guzzle": "^7.3"
+    }
+}

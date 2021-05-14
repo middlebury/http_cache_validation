@@ -1,0 +1,197 @@
+#!/usr/bin/env php
+<?php
+
+require_once dirname(__FILE__).'/vendor/autoload.php';
+
+use GuzzleHttp\Client;
+
+/**
+ * Loop through every line in the input file and compare the responses
+ *
+ * Input columns are:
+ *    Count: frequency of use
+ *    Protocol: http or https
+ *    Hostname
+ *    Request
+ *    Response status
+ */
+
+$usage = <<<END
+Usage:
+  $argv[0] [-h] [--help] --old-host=hostname_or_ip --new-host=hostname_or_ip [--start=0] [--limit=100] path/to/requests.txt
+
+Options:
+  -h, --help                  Show this help.
+
+  --old-host                  The hostname or ip to connect to as the original
+                              host to verify operation against.
+
+  --old-host-ca-cert          The CA certificate to use when making HTTPS
+                              requests to the old host. [optional]
+
+  --old-host-no-validate-ca   Do not validate the certificate of the old host.
+                              [optional]
+
+  --new-host                  The hostname or ip to connect to as the new
+                              host to verify operation against.
+
+  --new-host-ca-cert          The CA certificate to use when making HTTPS
+                              requests to the new host. [optional]
+
+  --new-host-no-validate-ca   Do not validate the certificate of the new host.
+                              [optional]
+
+  --start                     Starting postion in the data-set.
+                              Default: 0 [optional]
+
+  --limit                     The maximum number of rows in the input to verify.
+                              Default: 0 (unlimited) [optional]
+
+Parameters:
+  The remaining parameters are files containing requests to check. Format should
+  be tab-delimited with the following columns:
+      Count: frequency of use
+      Protocol: http or https
+      Hostname
+      Request
+      Response status
+
+END;
+
+$opts = getopt("h", ["help", "old-host:", "old-host-ca-cert:", "new-host:", "new-host-ca-cert:", "start:", "limit:",], $restIndex);
+$inputFiles = array_slice($argv, $restIndex);
+
+if (isset($opts['h']) || isset($opts['help']) || !isset($opts['old-host']) || !isset($opts['new-host']) || !count($inputFiles)) {
+  print $usage;
+  exit(1);
+}
+
+if (!empty($opts['start']) && intval($opts['start']) > 0) {
+  $start = intval($opts['start']);
+} else {
+  $start = 0;
+}
+if (!empty($opts['limit']) && intval($opts['limit']) > 0) {
+  $end = $start + intval($opts['limit']);
+} else {
+  $end = NULL;
+}
+
+
+// Create clients for HTTP and HTTPS for old and new.
+$guzzleArgs = [
+  // 'debug' => true,
+  'base_uri' => 'http://' . $opts['old-host'],
+  'allow_redirects' => FALSE,
+  'http_errors' => FALSE,
+];
+$oldHttpClient = new Client($guzzleArgs);
+
+$guzzleArgs['base_uri'] = 'https://' . $opts['old-host'];
+if (!empty($opts['old-host-ca-cert'])) {
+  $guzzleArgs['ssl.certificate_authority'] = $opts['old-host-ca-cert'];
+} elseif (isset($opts['old-host-no-validate-ca'])) {
+  $guzzleArgs['ssl.certificate_authority'] = FALSE;
+}
+$oldHttpsClient = new Client($guzzleArgs);
+
+$guzzleArgs['base_uri'] = 'http://' . $opts['new-host'];
+$guzzleArgs['headers'] = ['Fastly-Debug' => 'true'];
+$newHttpClient = new Client($guzzleArgs);
+
+if (!empty($opts['new-host-ca-cert'])) {
+  $guzzleArgs['ssl.certificate_authority'] = $opts['new-host-ca-cert'];
+} elseif (isset($opts['new-host-no-validate-ca'])) {
+  $guzzleArgs['ssl.certificate_authority'] = FALSE;
+}
+$newHttpsClient = new Client($guzzleArgs);
+
+// Loop through our input files and check each request.
+$i = 0;
+foreach ($inputFiles as $inputFile) {
+  $inputHandle = fopen($inputFile, 'r');
+  while (($line = fgets($inputHandle, 4096)) !== false) {
+    // Fast-forward to our starting position.
+    if ($i < $start) {
+      continue;
+    }
+    // Finish if we've reached our limit.
+    if (!is_null($end) && $i >= $end) {
+      fclose($inputHandle);
+      exit();
+    }
+    $i++;
+
+    compareResponses($line, $oldHttpClient, $oldHttpsClient, $newHttpClient, $newHttpsClient);
+
+    if (feof($inputHandle)) {
+      throw new Exception("Error: unexpected fgets() fail\n");
+    }
+  }
+  fclose($inputHandle);
+}
+
+function compareResponses($line, Client $oldHttpClient, Client $oldHttpsClient, Client $newHttpClient, Client $newHttpsClient) {
+  $cols = explode("\t", trim($line));
+  // print_r($cols);
+  $protocol = $cols[1];
+  $host = $cols[2];
+  $request = $cols[3];
+  $status = intval($cols[4]);
+
+  if ($protocol == 'https') {
+    $oldClient = $oldHttpsClient;
+    $newClient = $newHttpsClient;
+  } else {
+    $oldClient = $oldHttpClient;
+    $newClient = $newHttpClient;
+  }
+
+  $headers = [
+    'Host' => $host,
+  ];
+
+
+  try {
+    // Try the request against the new host.
+    $response = $newClient->get($request, ['headers' => $headers]);
+    $validated = TRUE;
+    if ($response->getStatusCode() != $status) {
+      $validated = FALSE;
+      print "mismatched-status-$status-" . $response->getStatusCode() . "\t";
+    } else {
+      // Fetch the redirect location and ensure that they match.
+      if ($status == 301 || $status == 302) {
+        $oldResponse = $newClient->get($request, ['headers' => $headers]);
+        if ($oldResponse->getHeader('Location') != $response->getHeader('Location')) {
+          $validated = FALSE;
+          print "mismatched-redirect-location\t";
+        }
+      }
+    }
+    if ($validated) {
+      print "response-validated\t";
+    }
+    // Try a second request and check that it is now cached.
+    if ($response->getStatusCode() < 500) {
+      $response2 = $newClient->get($request, ['headers' => $headers]);
+      $xCache = $response2->getHeader('X-Cache');
+      if (empty($xCache[0])) {
+        print "X-Cache-missing\t";
+      }
+      elseif (preg_match('/(\w+)$/', $xCache[0], $m)) {
+        print "second-request-" . $m[1] . "\t";
+      }
+      else {
+        print "X-Cache-malformed\t";
+      }
+    } else {
+      print "error-response-uncached\t";
+    }
+
+    print "$protocol://$host$request\n";
+  } catch (Exception $e) {
+    print "$protocol://$host$request\t";
+    print $e->getMessage() . "\n";
+  }
+}
