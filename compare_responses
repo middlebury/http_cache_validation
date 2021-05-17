@@ -150,7 +150,7 @@ function compareResponses($line, Client $oldHttpClient, Client $oldHttpsClient, 
   $headers = [
     'Host' => $host,
   ];
-
+  $messages = [];
 
   try {
     // Try the request against the new host.
@@ -162,10 +162,11 @@ function compareResponses($line, Client $oldHttpClient, Client $oldHttpsClient, 
     } else {
       // Fetch the redirect location and ensure that they match.
       if ($status == 301 || $status == 302) {
-        $oldResponse = $newClient->get($request, ['headers' => $headers]);
-        if ($oldResponse->getHeader('Location') != $response->getHeader('Location')) {
+        $oldResponse = $oldClient->get($request, ['headers' => $headers]);
+        if ($oldResponse->getHeader('Location')[0] != $response->getHeader('Location')[0]) {
           $validated = FALSE;
           print "mismatched-redirect-location\t";
+          $messages[] = "old-Location: " . $oldResponse->getHeader('Location')[0] . " new-Location: " . $response->getHeader('Location')[0];
         }
       }
     }
@@ -180,7 +181,20 @@ function compareResponses($line, Client $oldHttpClient, Client $oldHttpsClient, 
         print "X-Cache-missing\t";
       }
       elseif (preg_match('/(\w+)$/', $xCache[0], $m)) {
-        print "second-request-" . $m[1] . "\t";
+        if ($m[1] == "HIT") {
+          print "request2-new-" . $m[1] . "\t";
+        }
+        // Try two requests to our old back-end to compare.
+        else {
+          $oldResponse1 = $oldClient->get($request, ['headers' => $headers]);
+          $oldResponse2 = $oldClient->get($request, ['headers' => $headers]);
+          $oldCached = preg_match('/^\d+ \d+$/', $oldResponse2->getHeader('X-Varnish')[0]);
+          if ($oldCached) {
+            print "request2-old-HIT-new-" . $m[1] . "\t";
+          } else {
+            print "request2-old-MISS-new-" . $m[1] . "\t";
+          }
+        }
       }
       else {
         print "X-Cache-malformed\t";
@@ -189,7 +203,7 @@ function compareResponses($line, Client $oldHttpClient, Client $oldHttpsClient, 
       print "error-response-uncached\t";
     }
 
-    print "$protocol://$host$request\n";
+    print "$protocol://$host$request\t" . implode("; ", $messages) . "\n";
   } catch (Exception $e) {
     print "$protocol://$host$request\t";
     print $e->getMessage() . "\n";
