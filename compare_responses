@@ -58,7 +58,7 @@ Parameters:
 
 END;
 
-$opts = getopt("h", ["help", "old-host:", "old-host-ca-cert:", "new-host:", "new-host-ca-cert:", "start:", "limit:",], $restIndex);
+$opts = getopt("h", ["help", "old-host:", "old-host-ca-cert:", "old-host-no-validate-ca", "new-host:", "new-host-ca-cert:", "new-host-no-validate-ca", "start:", "limit:",], $restIndex);
 $inputFiles = array_slice($argv, $restIndex);
 
 if (isset($opts['h']) || isset($opts['help']) || !isset($opts['old-host']) || !isset($opts['new-host']) || !count($inputFiles)) {
@@ -89,9 +89,9 @@ $oldHttpClient = new Client($guzzleArgs);
 
 $guzzleArgs['base_uri'] = 'https://' . $opts['old-host'];
 if (!empty($opts['old-host-ca-cert'])) {
-  $guzzleArgs['ssl.certificate_authority'] = $opts['old-host-ca-cert'];
+  $guzzleArgs['verify'] = $opts['old-host-ca-cert'];
 } elseif (isset($opts['old-host-no-validate-ca'])) {
-  $guzzleArgs['ssl.certificate_authority'] = FALSE;
+  $guzzleArgs['verify'] = FALSE;
 }
 $oldHttpsClient = new Client($guzzleArgs);
 
@@ -100,9 +100,9 @@ $guzzleArgs['headers'] = ['Fastly-Debug' => 'true'];
 $newHttpClient = new Client($guzzleArgs);
 
 if (!empty($opts['new-host-ca-cert'])) {
-  $guzzleArgs['ssl.certificate_authority'] = $opts['new-host-ca-cert'];
+  $guzzleArgs['verify'] = $opts['new-host-ca-cert'];
 } elseif (isset($opts['new-host-no-validate-ca'])) {
-  $guzzleArgs['ssl.certificate_authority'] = FALSE;
+  $guzzleArgs['verify'] = FALSE;
 }
 $guzzleArgs['base_uri'] = 'https://' . $opts['new-host'];
 $newHttpsClient = new Client($guzzleArgs);
