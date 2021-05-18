@@ -104,6 +104,7 @@ if (!empty($opts['new-host-ca-cert'])) {
 } elseif (isset($opts['new-host-no-validate-ca'])) {
   $guzzleArgs['ssl.certificate_authority'] = FALSE;
 }
+$guzzleArgs['base_uri'] = 'https://' . $opts['new-host'];
 $newHttpsClient = new Client($guzzleArgs);
 
 // Loop through our input files and check each request.
