@@ -157,8 +157,14 @@ function compareResponses($line, Client $oldHttpClient, Client $oldHttpsClient, 
     $response = $newClient->get($request, ['headers' => $headers]);
     $validated = TRUE;
     if ($response->getStatusCode() != $status) {
-      $validated = FALSE;
-      print "mismatched-status-$status-" . $response->getStatusCode() . "\t";
+      // Fetch from the old server again in case content has changed since the
+      // log was written.
+      $oldResponse = $oldClient->get($request, ['headers' => $headers]);
+      if ($response->getStatusCode() != $oldResponse->getStatusCode()) {
+        // Still not the same -- report a mismatch.
+        $validated = FALSE;
+        print "mismatched-status-$status-" . $response->getStatusCode() . "\t";
+      }
     } else {
       // Fetch the redirect location and ensure that they match.
       if ($status == 301 || $status == 302) {
