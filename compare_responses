@@ -165,7 +165,13 @@ function compareResponses($line, Client $oldHttpClient, Client $oldHttpsClient, 
         $oldResponse = $oldClient->get($request, ['headers' => $headers]);
         if ($oldResponse->getHeader('Location')[0] != $response->getHeader('Location')[0]) {
           $validated = FALSE;
-          print "mismatched-redirect-location\t";
+          preg_match('#^(https?)://(.+)$#', $oldResponse->getHeader('Location')[0], $oldLocationMatches);
+          preg_match('#^(https?)://(.+)$#', $response->getHeader('Location')[0], $newLocationMatches);
+          if ($oldLocationMatches[1] != $newLocationMatches[1] && $oldLocationMatches[2] == $newLocationMatches[2]) {
+            print "mismatched-redirect-protocol\t";
+          } else {
+            print "mismatched-redirect-location\t";
+          }
           $messages[] = "old-Location: " . $oldResponse->getHeader('Location')[0] . " new-Location: " . $response->getHeader('Location')[0];
         }
       }
