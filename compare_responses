@@ -138,6 +138,7 @@ foreach ($inputFiles as $inputFile) {
 function compareResponses($line, Client $oldHttpClient, Client $oldHttpsClient, Client $newHttpClient, Client $newHttpsClient) {
   $cols = explode("\t", trim($line));
   // print_r($cols);
+  $count = $cols[0];
   $protocol = $cols[1];
   $host = $cols[2];
   $request = $cols[3];
@@ -155,6 +156,8 @@ function compareResponses($line, Client $oldHttpClient, Client $oldHttpsClient, 
     'Host' => $host,
   ];
   $messages = [];
+
+  print $count . "\t";
 
   try {
     // Try the request against the new host.
@@ -189,6 +192,10 @@ function compareResponses($line, Client $oldHttpClient, Client $oldHttpsClient, 
     if ($validated) {
       print "response-validated\t";
     }
+
+    # Include the status code in the output.
+    print $response->getStatusCode() . "\t";
+
     // Try a second request and check that it is now cached.
     if ($response->getStatusCode() < 500) {
       $response2 = $newClient->get($request, ['headers' => $headers]);
