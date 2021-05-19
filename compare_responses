@@ -84,6 +84,10 @@ $guzzleArgs = [
   'base_uri' => 'http://' . $opts['old-host'],
   'allow_redirects' => FALSE,
   'http_errors' => FALSE,
+  'headers' => [
+    'Middlebury-Debug' => 'true',
+    'Fastly-Debug' => 'true',
+  ],
 ];
 $oldHttpClient = new Client($guzzleArgs);
 
@@ -96,7 +100,6 @@ if (!empty($opts['old-host-ca-cert'])) {
 $oldHttpsClient = new Client($guzzleArgs);
 
 $guzzleArgs['base_uri'] = 'http://' . $opts['new-host'];
-$guzzleArgs['headers'] = ['Fastly-Debug' => 'true'];
 $newHttpClient = new Client($guzzleArgs);
 
 if (!empty($opts['new-host-ca-cert'])) {
@@ -199,14 +202,16 @@ function compareResponses($line, Client $oldHttpClient, Client $oldHttpsClient, 
         }
         // Try two requests to our old back-end to compare.
         else {
+          print "request2-old-";
           $oldResponse1 = $oldClient->get($request, ['headers' => $headers]);
           $oldResponse2 = $oldClient->get($request, ['headers' => $headers]);
-          $oldCached = preg_match('/^\d+ \d+$/', $oldResponse2->getHeader('X-Varnish')[0]);
-          if ($oldCached) {
-            print "request2-old-HIT-new-" . $m[1] . "\t";
+          $oldXCache = $oldResponse2->getHeader('X-Cache');
+          if (empty($oldXCache[0])) {
+            print "XCacheMissing";
           } else {
-            print "request2-old-MISS-new-" . $m[1] . "\t";
+            print $oldXCache[0];
           }
+          print "-new-" . $m[1] . "\t";
         }
       }
       else {
